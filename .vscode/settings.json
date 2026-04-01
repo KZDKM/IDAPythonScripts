@@ -1,0 +1,8 @@
+{
+    "python.analysis.extraPaths": [
+        "C:/Program Files/IDA Professional 9.3/python"
+    ],
+    "python.linting.enabled": true,
+    "python.formatting.provider": "black",   // or "ruff"
+    "editor.formatOnSave": true
+}
