@@ -37,9 +37,8 @@ def stack_get(off):
 # collect bytecodes, run until we hit jmp reg
 # we then use the known values to run unicorn to figure out reg value
 count = 0
-while count < 1:
+while count < 1000:
     disasm = idc.generate_disasm_line(cur_ea, 0)
-    print(disasm)
     insn = ida_ua.insn_t()
     length = ida_ua.decode_insn(insn, cur_ea)
 
@@ -74,6 +73,12 @@ while count < 1:
 
     if insn.get_canon_mnem() != "call" and insn.get_canon_mnem() != "jmp":
         code.append(ida_bytes.get_bytes(cur_ea, length))
+        print(disasm)
+        print(f"recorded {' '.join(f'{b:02x}' for b in ida_bytes.get_bytes(cur_ea, length))}")
+
+
+    else:
+        print(disasm + " (skip)")
     count = count + 1
     cur_ea = cur_ea + length
 
@@ -85,33 +90,52 @@ for s in stack:
 for r in stack_reads:
     print(r[1] + " = " + "[esp + " + str(esp_off - r[0]) + "]")
 
+
+# sanity check for emulation
+print("collected " + str(b''.join(code).__len__()) + " bytes of code")
+print(f"recorded {' '.join(f'{b:02x}' for b in b''.join(code))}")
+
+
+mu = Uc(UC_ARCH_X86, UC_MODE_64)
 def hook_mem_read(uc, access, address, size, value, user_data):
-    esp = uc.reg_read(UC_X86_REG_ESP)
-    if esp <= address < esp + 0x100:
-        val = stack_get(esp)
+    rsp = uc.reg_read(UC_X86_REG_RSP)
+    print(str(address) + " read " + str(rsp))
+    # stack read
+    if rsp <= address < rsp + 0x100:
+        val = stack_get(rsp)
         if val != None:
             print(str(address) + " -> " + str(val))
             uc.mem_write(address, val)
-def hook_mem_write(uc, access, address, size, value, user_data):
-    rip = uc.reg_read(UC_X86_REG_RIP)
-    uc.reg_write(UC_X86_REG_RIP, rip + size)
+    # simulate read to data 
+    #b = idc.get_bytes(address) 
+    #uc.mem_write()
 
-print("collected " + str(b''.join(code).__len__()) + " bytes of code")
-mu = Uc(UC_ARCH_X86, UC_MODE_64)
+# halt on invalid mem access
+def hook_invalid(uc, access, address, size, value, user_data):
+    print(f"INVALID memory access at {hex(address)}")
+    return False  # stop emulation
+
+def hook_code(uc, address, size, user_data):
+    if not hasattr(hook_code, 'count'):
+        hook_code.count = 0
+    hook_code.count += 1
+    print(f"executed {hook_code.count} lines")
+    rsp = uc.reg_read(UC_X86_REG_RSP)
+    inst_bytes = uc.mem_read(address, size)
+    hex_str = " ".join(f"{b:02x}" for b in inst_bytes)
+    #print(f"RIP {hex(address)}")
+    #print(hex_str)
+    #print(f"RSP {hex(rsp)}")
+
 mu.mem_map(0x1000000, 2 * 1024 * 1024)
 mu.mem_write(0x1000000, b''.join(code))
 mu.hook_add(UC_HOOK_MEM_READ, hook_mem_read)
-mu.hook_add(UC_HOOK_MEM_WRITE, hook_mem_write)
-
-def hook_invalid(uc, access, address, size, value, user_data):
-    print(f"INVALID access at {hex(address)}")
-    return False  # stop emulation
-
+mu.hook_add(UC_HOOK_CODE, hook_code)
 mu.hook_add(UC_HOOK_MEM_INVALID, hook_invalid)
 
-mu.mem_map(0x2000000, 0x1000)
-mu.reg_write(UC_X86_REG_RSP, 0x2001000)
+stack_start = 0x2000000
+stack_size = 0x5000
+mu.mem_map(stack_start, stack_size) # initialize a dummy stack
+mu.reg_write(UC_X86_REG_RSP, stack_start + stack_size - 8)
 
-import platform
-print(platform.machine())
-#mu.emu_start(0x1000000, 0x1000000 + b''.join(code).__len__())
+mu.emu_start(0x1000000, 0x1000000 + b''.join(code).__len__())
