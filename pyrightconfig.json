@@ -1,0 +1,11 @@
+{
+  "pythonVersion": "3.11", // Match the Python version embedded in your IDA (check Help → About in IDA)
+  //"venvPath": ".",
+  ///"venv": ".venv",
+  "extraPaths": [
+    "/Applications/IDA Professional 9.3.app/Contents/MacOS/python",
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "none", // Optional: reduce noise if some IDA modules still complain
+  "reportIndexIssue": "none",
+}
