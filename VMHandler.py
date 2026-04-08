@@ -22,6 +22,7 @@ def vm_handler(cur_ea, ctx: TritonContext):
     count = 0
     while count < 1000:
         disasm = idc.generate_disasm_line(cur_ea, 0)
+        disasm = idaapi.tag_remove(disasm)
         insn = ida_ua.insn_t()
         length = ida_ua.decode_insn(insn, cur_ea)
 

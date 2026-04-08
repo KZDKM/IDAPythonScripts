@@ -1,14 +1,17 @@
 import importlib
 import sys
 
+sys.dont_write_bytecode = True
+
 import idaapi
 from triton import *
+
+from VMEnter import vm_enter
+from VMHandler import vm_handler
 
 importlib.reload(sys.modules["VMEnter"])
 importlib.reload(sys.modules["VMHandler"])
 
-from VMEnter import vm_enter
-from VMHandler import vm_handler
 
 idaapi.msg_clear()
 idaapi.init_hexrays_plugin()

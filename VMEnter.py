@@ -1,9 +1,6 @@
 import struct
 
-import ida_bytes
-import ida_ua
 import idaapi
-import idc
 from triton import *
 
 
@@ -27,9 +24,10 @@ def vm_enter(cur_ea, ctx: TritonContext):
     # we then use the known values to run unicorn to figure out reg value
     count = 0
     while count < 1000:
-        disasm = idc.generate_disasm_line(cur_ea, 0)
-        insn = ida_ua.insn_t()
-        length = ida_ua.decode_insn(insn, cur_ea)
+        disasm = idaapi.generate_disasm_line(cur_ea, 0)
+        disasm = idaapi.tag_remove(disasm)
+        insn = idaapi.insn_t()
+        length = idaapi.decode_insn(insn, cur_ea)
 
         if insn.get_canon_mnem() == "ret":
             break
@@ -38,7 +36,7 @@ def vm_enter(cur_ea, ctx: TritonContext):
         if insn.get_canon_mnem() == "call" or insn.get_canon_mnem() == "jmp":
             cur_ea = insn.ops[0].addr - length
             if insn.get_canon_mnem() == "jmp":
-                if insn.ops[0].type == ida_ua.o_reg:
+                if insn.ops[0].type == idaapi.o_reg:
                     break  # TODO
             if insn.get_canon_mnem() == "call":
                 esp_off = esp_off + 8
@@ -48,10 +46,10 @@ def vm_enter(cur_ea, ctx: TritonContext):
 
         if insn.get_canon_mnem() == "push":
             esp_off = esp_off + 8
-            if insn.ops[0].type == ida_ua.o_reg:
+            if insn.ops[0].type == idaapi.o_reg:
                 mappings.append((idaapi.get_reg_name(insn.ops[0].reg, 8), esp_off))
             # we push imms onto virtual stack
-            if insn.ops[0].type == ida_ua.o_imm:
+            if insn.ops[0].type == idaapi.o_imm:
                 stack.append((esp_off, insn.ops[0].value))
 
         # TODO: remove mapping if popped
@@ -61,7 +59,7 @@ def vm_enter(cur_ea, ctx: TritonContext):
 
         # check stack access
         if insn.get_canon_mnem() == "mov":
-            if insn.ops[1].type == ida_ua.o_displ:
+            if insn.ops[1].type == idaapi.o_displ:
                 if idaapi.get_reg_name(insn.ops[1].reg, 8) == "rsp":
                     stack_reads.append(
                         (
@@ -72,10 +70,10 @@ def vm_enter(cur_ea, ctx: TritonContext):
 
         if insn.get_canon_mnem() != "call" and insn.get_canon_mnem() != "jmp":
             # replace rip reads
-            triton_inst = Instruction(ida_bytes.get_bytes(cur_ea, length))
+            triton_inst = Instruction(idaapi.get_bytes(cur_ea, length))
             triton_inst.setAddress(cur_ea)
             if disasm.startswith("lea"):
-                if insn.ops[1].type == ida_ua.o_mem:
+                if insn.ops[1].type == idaapi.o_mem:
                     dest_reg = insn.ops[0].reg
                     # holy shitshow: movabs reg, addr
                     instruction_bytes = struct.pack(
@@ -93,17 +91,17 @@ def vm_enter(cur_ea, ctx: TritonContext):
                     print("------")
 
             code.add(triton_inst)
-            # print(disasm)
+            print(disasm)
             # print( f"recorded {' '.join(f'{b:02x}' for b in ida_bytes.get_bytes(cur_ea, length))}" )
         elif insn.get_canon_mnem() == "call":
             # sub rsp, 8
             triton_inst = Instruction(b"\x48\x83\xec\x08")
             triton_inst.setAddress(cur_ea)
             code.add(triton_inst)  # to maintain the effect of call on stack
-            # print("(call)")
+            print("(call)")
 
-        # else:
-        # print(disasm + " (skip)")
+        else:
+            print(disasm + " (skip)")
         count = count + 1
         cur_ea = cur_ea + length
 
@@ -129,7 +127,7 @@ def vm_enter(cur_ea, ctx: TritonContext):
             print(f"stack access {hex(addr)} -> [rsp + {hex(addr - rsp)}]: ")
             print_bytes(ctx.getConcreteMemoryAreaValue(addr, 8))
             return
-        b = idc.get_bytes(addr, size)
+        b = idaapi.get_bytes(addr, size)
         ctx.setConcreteMemoryAreaValue(addr, b)
         print(f"mem accessed at {hex(addr)}:")
         print_bytes(b)
