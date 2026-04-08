@@ -10,8 +10,6 @@ def print_bytes(b):
 
 
 def vm_handler(cur_ea, ctx: TritonContext):
-    rips = []  # record rip values
-    disasm_inst = []  # save disassembled instructions
 
     code = BasicBlock()
     # somehow the first instruction in a new basicblock has wrong address
@@ -19,44 +17,60 @@ def vm_handler(cur_ea, ctx: TritonContext):
         Instruction(b"\x90")
     )  # hack fix, have no idea what the actual fuck is going on
 
-    count = 0
-    while count < 1000:
+    inst_count = 0
+    while True:
         disasm = idc.generate_disasm_line(cur_ea, 0)
         disasm = idaapi.tag_remove(disasm)
-        insn = ida_ua.insn_t()
-        length = ida_ua.decode_insn(insn, cur_ea)
+        inst = ida_ua.insn_t()
+        length = ida_ua.decode_insn(inst, cur_ea)
 
-        if insn.get_canon_mnem() == "retn":
+        if inst.get_canon_mnem() == "retn":
             print("hit retn, stopping trace")
             break
 
         # do uncon jumps
-        if insn.get_canon_mnem() == "call" or insn.get_canon_mnem() == "jmp":
-            cur_ea = insn.ops[0].addr - length
-            if insn.get_canon_mnem() == "jmp":
-                if insn.ops[0].type == ida_ua.o_reg:
+        if inst.get_canon_mnem() == "call" or inst.get_canon_mnem() == "jmp":
+            cur_ea = inst.ops[0].addr
+            # detect dynamic jump
+            if inst.get_canon_mnem() == "jmp":
+                if inst.ops[0].type == ida_ua.o_reg:
                     print("hit jmp reg, stopping trace")
                     break
+            # to maintain the effect of call on stack
+            if inst.get_canon_mnem() == "call":
+                # sub rsp, 8
+                triton_inst = Instruction(b"\x48\x83\xec\x08")
+                ctx.processing(triton_inst)
+                code.add(triton_inst)
 
-        if insn.get_canon_mnem() != "call" and insn.get_canon_mnem() != "jmp":
-            # code.append(ida_bytes.get_bytes(cur_ea, length))
-            triton_inst = Instruction(ida_bytes.get_bytes(cur_ea, length))
-            code.add(triton_inst)
-            rips.append(cur_ea)
-            disasm_inst.append(disasm)
+            inst_count = inst_count + 1
+            continue
+
+        triton_inst = Instruction(ida_bytes.get_bytes(cur_ea, length))
+        ctx.disassembly(triton_inst)
+
+        # resolve opaque predicate
+        if triton_inst.isBranch():
             # print(disasm)
-            # print( f"recorded {' '.join(f'{b:02x}' for b in ida_bytes.get_bytes(cur_ea, length))}" )
-        elif insn.get_canon_mnem() == "call":
-            # sub rsp, 8
-            # code.append(b"\x48\x83\xec\x08")  # to maintain the effect of call on stack
-            triton_inst = Instruction(b"\x48\x83\xec\x08")
+            ctx.processing(triton_inst)
+            pred = ctx.getPathPredicate()
+            print(f"solving opaque predicate {pred}")
+            ast_ctx = ctx.getAstContext()
+            model = ctx.getModel(ast_ctx.lnot(pred))
+            if model:
+                print("ERROR: found indeterminate branch")
+            else:
+                print(f"branch taken {triton_inst.isConditionTaken()}")
+                if triton_inst.isConditionTaken():
+                    cur_ea = inst.ops[0].addr
+                    inst_count = inst_count + 1
+                    continue
+        else:
             code.add(triton_inst)
-            rips.append(cur_ea)
-            disasm_inst.append("(call)")
+            ctx.processing(triton_inst)
+            # print(disasm)
 
-        # else:
-        # print(disasm + " (skip)")
-        count = count + 1
+        inst_count = inst_count + 1
         cur_ea = cur_ea + length
 
     # to correctly calculate next handler address (rdi)
@@ -91,7 +105,7 @@ def vm_handler(cur_ea, ctx: TritonContext):
     ctx.addCallback(CALLBACK.GET_CONCRETE_MEMORY_VALUE, memory_read_callback_vmhandler)
     ctx.addCallback(CALLBACK.SET_CONCRETE_MEMORY_VALUE, memory_write_callback_vmhandler)
 
-    ctx.processing(code_s)
-    print(hex(ctx.getSymbolicRegisterValue(ctx.registers.rax)))
-    print(hex(ctx.getSymbolicRegisterValue(ctx.registers.rbx)))
-    print(hex(ctx.getSymbolicRegisterValue(ctx.registers.rdi)))
+    # ctx.processing(code_s)
+    # print(hex(ctx.getSymbolicRegisterValue(ctx.registers.rax)))
+    # print(hex(ctx.getSymbolicRegisterValue(ctx.registers.rbx)))
+    # print(hex(ctx.getSymbolicRegisterValue(ctx.registers.rdi)))
